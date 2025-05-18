@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -11,6 +11,7 @@ from src.mcp_server.redis_client import RedisClient
 from src.utils.config import Config
 from src.mcp_server.task_queue import TaskQueue
 from src.models.task_models import TaskCreate, TaskResponse, TaskStatus, TaskResult
+from src.mcp_server.ws_handler import connection_manager
 
 # Create FastAPI app
 app = FastAPI(
@@ -130,6 +131,36 @@ async def get_task_status(
         updated_at=datetime.fromisoformat(task.get("updated_at", datetime.now().isoformat()))
     )
 
+# Add PUT endpoint for updating task status
+@app.put("/api/task/{task_id}/status")
+async def update_task_status(
+    task_id: str,
+    status_update: dict,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    # Validate token
+    if credentials.credentials != Config.AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid token")
+   
+    # Get task
+    task = await task_queue.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+      
+    # Update status
+    success = await task_queue.update_task_status(
+        task_id=task_id,
+        status=status_update.get("status", task.get("status")),
+        progress=status_update.get("progress", task.get("progress", 0.0)),
+        message=status_update.get("message", "")
+    )
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update task status")
+    
+    return {"status": "updated", "task_id": task_id}
+
+
 # Add endpoint to get active tasks
 @app.get("/api/tasks/active", response_model=List[TaskStatus])
 async def get_active_tasks(
@@ -158,11 +189,27 @@ async def get_active_tasks(
 @app.on_event("startup")
 async def startup_event():
     # Check Redis connection
-    await task_queue.initialize()
+    
     connected = await redis_client.is_connected()
     if not connected:
         print("WARNING: Could not connect to Redis")
 
+    await task_queue.initialize()
+    # Start Redis listener for WebSocket broadcasts
+    await connection_manager.start_redis_listener()
+    print("WebSocket notification system initialized")
+
+# Add WebSocket endpoint
+@app.websocket("/ws/task-updates")
+async def websocket_endpoint(websocket: WebSocket):
+    await connection_manager.connect(websocket)
+    try:
+        while True:
+            # Just keep the connection alive
+            # Redis listener will handle sending messages
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        connection_manager.disconnect(websocket)
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
