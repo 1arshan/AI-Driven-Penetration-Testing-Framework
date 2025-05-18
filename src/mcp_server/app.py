@@ -9,6 +9,8 @@ from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
 from src.mcp_server.redis_client import RedisClient
 from src.utils.config import Config
+from src.mcp_server.task_queue import TaskQueue
+from src.models.task_models import TaskCreate, TaskResponse, TaskStatus, TaskResult
 
 # Create FastAPI app
 app = FastAPI(
@@ -28,6 +30,9 @@ app.add_middleware(
 
 # Set up authentication
 security = HTTPBearer()
+
+# Initialize task queue
+task_queue = TaskQueue()
 
 # Model definitions
 class TaskCreate(BaseModel):
@@ -51,114 +56,112 @@ redis_client = RedisClient()
 async def root():
     return {"message": "AI-Driven Penetration Testing Framework MCP Server"}
 
-# @app.post("/api/task/create", response_model=TaskResponse)
-# async def create_task(
-#     task: TaskCreate,
-#     credentials: HTTPAuthorizationCredentials = Depends(security),
-#     background_tasks: BackgroundTasks = None
-# ):
-#     # Basic token validation (replace with proper auth)
-#     if credentials.credentials != "dev_token":
-#         raise HTTPException(status_code=401, detail="Invalid token")
-    
-#     # Create a new task with UUID
-#     task_id = str(uuid.uuid4())
-    
-#     # Store task
-#     tasks[task_id] = {
-#         "id": task_id,
-#         "type": task.type,
-#         "target": task.target,
-#         "scope": task.scope,
-#         "description": task.description,
-#         "status": "created",
-#         "created_at": datetime.now().isoformat()
-#     }
-    
-#     return {"task_id": task_id, "status": "created"}
 
-# @app.get("/api/task/{task_id}")
-# async def get_task(
-#     task_id: str,
-#     credentials: HTTPAuthorizationCredentials = Depends(security)
-# ):
-#     # Basic token validation
-#     if credentials.credentials != "dev_token":
-#         raise HTTPException(status_code=401, detail="Invalid token")
-    
-#     # Get task
-#     if task_id not in tasks:
-#         raise HTTPException(status_code=404, detail="Task not found")
-    
-#     return tasks[task_id]
-
-
-# Update create_task endpoint
+# Updated create_task endpoint
 @app.post("/api/task/create", response_model=TaskResponse)
 async def create_task(
     task: TaskCreate,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     background_tasks: BackgroundTasks = None
 ):
-    # Basic token validation
+    # Validate token
     if credentials.credentials != Config.AUTH_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid token")
     
-    # Create a new task with UUID
-    task_id = str(uuid.uuid4())
+    # Convert to dict
+    task_dict = task.model_dump()
     
-    # Prepare task data
-    task_data = {
-        "id": task_id,
-        "type": task.type,
-        "target": task.target,
-        "scope": task.scope,
-        "description": task.description,
-        "status": "created",
-        "created_at": datetime.now().isoformat()
-    }
+    # Enqueue task using the new task queue
+    task_id = await task_queue.enqueue_task(task_dict)
     
-    # Store in Redis
-    success = await redis_client.store_task(task_id, task_data)
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to store task")
-    
-    return {"task_id": task_id, "status": "created"}
+    return TaskResponse(
+        task_id=task_id,
+        status="created",
+        created_at=datetime.now()
+    )
 
-# Update get_task endpoint
+# Updated get_task endpoint
 @app.get("/api/task/{task_id}")
 async def get_task(
     task_id: str,
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
-    # Basic token validation
+    # Validate token
     if credentials.credentials != Config.AUTH_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid token")
     
-    # Get task from Redis
-    task_data = await redis_client.get_task(task_id)
-    if not task_data:
+    # Get task from Redis via the task queue
+    task = await task_queue.get_task(task_id)
+    if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
     # Get result if available
-    result_data = await redis_client.get_result(task_id)
+    result = await task_queue.get_result(task_id)
     
     # Combine task and result
     response = {
-        "task": task_data,
-        "result": result_data
+        "task": task,
+        "result": result
     }
     
     return response
+
+# Add endpoint to get task status
+@app.get("/api/task/{task_id}/status", response_model=TaskStatus)
+async def get_task_status(
+    task_id: str,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    # Validate token
+    if credentials.credentials != Config.AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    # Get task
+    task = await task_queue.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    return TaskStatus(
+        task_id=task_id,
+        status=task.get("status", "unknown"),
+        agent_id=task.get("agent_id"),
+        progress=task.get("progress", 0.0),
+        message=task.get("message"),
+        updated_at=datetime.fromisoformat(task.get("updated_at", datetime.now().isoformat()))
+    )
+
+# Add endpoint to get active tasks
+@app.get("/api/tasks/active", response_model=List[TaskStatus])
+async def get_active_tasks(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    # Validate token
+    if credentials.credentials != Config.AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    # Get active tasks
+    active_tasks = await task_queue.get_active_tasks()
+    
+    return [
+        TaskStatus(
+            task_id=task["id"],
+            status=task.get("status", "unknown"),
+            agent_id=task.get("agent_id"),
+            progress=task.get("progress", 0.0),
+            message=task.get("message"),
+            updated_at=datetime.fromisoformat(task.get("updated_at", datetime.now().isoformat()))
+        )
+        for task in active_tasks
+    ]
 
 # Add Redis connection check on startup
 @app.on_event("startup")
 async def startup_event():
     # Check Redis connection
+    await task_queue.initialize()
     connected = await redis_client.is_connected()
     if not connected:
         print("WARNING: Could not connect to Redis")
-
 
 
 if __name__ == "__main__":

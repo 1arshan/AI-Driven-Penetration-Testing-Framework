@@ -110,10 +110,10 @@ AI-Driven-PenTest-Framework/
 ## Development Roadmap
 
 - **Week 1**: Project setup and basic infrastructure ✅
-- **Week 2**: Agent framework and Redis task management
-- **Week 3**: Reconnaissance agent implementation
-- **Week 4**: Tool integration framework
-- **Week 5**: Vulnerability discovery agent
+- **Week 2**: Database and Knowledge System
+- **Week 3**: Basic Agent Framework
+- **Week 4**: Reconnaissance Agent
+- **Week 5**: Vulnerability Discovery Agent
 - **Week 6-7**: Knowledge base with vector database
 - **Week 8-9**: End-to-end workflows and reporting
 - **Week 10-12**: Testing, optimization, and documentation
