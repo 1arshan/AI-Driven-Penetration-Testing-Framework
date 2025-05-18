@@ -12,6 +12,7 @@ from src.utils.config import Config
 from src.mcp_server.task_queue import TaskQueue
 from src.models.task_models import TaskCreate, TaskResponse, TaskStatus, TaskResult
 from src.mcp_server.ws_handler import connection_manager
+from src.agents.agent_registry import AgentRegistry
 
 # Create FastAPI app
 app = FastAPI(
@@ -34,6 +35,9 @@ security = HTTPBearer()
 
 # Initialize task queue
 task_queue = TaskQueue()
+
+# Initialize agent registry
+agent_registry = AgentRegistry()
 
 # Model definitions
 class TaskCreate(BaseModel):
@@ -202,6 +206,7 @@ async def startup_event():
 # Add WebSocket endpoint
 @app.websocket("/ws/task-updates")
 async def websocket_endpoint(websocket: WebSocket):
+    
     await connection_manager.connect(websocket)
     try:
         while True:
@@ -210,6 +215,114 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         connection_manager.disconnect(websocket)
+
+# Add endpoints for agent management
+@app.post("/api/agents/register")
+async def register_agent(
+    agent_info: Dict[str, Any],
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Register a new agent with the system.
+    
+    Agents call this endpoint to announce their existence and capabilities.
+    """
+    # Validate token
+    if credentials.credentials != Config.AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    # Register agent
+    success = await agent_registry.register_agent(agent_info)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to register agent")
+    
+    return {"status": "success", "agent_id": agent_info.get("agent_id")}
+
+@app.get("/api/agents")
+async def get_all_agents(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Get all registered agents.
+    
+    Returns information about all agents currently registered with the system.
+    """
+    # Validate token
+    if credentials.credentials != Config.AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    # Get all agents
+    agents = await agent_registry.get_all_agents()
+    
+    return {"agents": agents}
+
+
+@app.get("/api/agents/type/{agent_type}")
+async def get_agents_by_type(
+    agent_type: str,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Get agents by type.
+    
+    Returns information about all agents of a specific type (e.g., reconnaissance).
+    """
+    # Validate token
+    if credentials.credentials != Config.AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    # Get agents by type
+    agents = await agent_registry.get_agents_by_type(agent_type)
+    
+    return {"agent_type": agent_type, "agents": agents}
+
+@app.delete("/api/agents/{agent_id}")
+async def unregister_agent(
+    agent_id: str,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Unregister an agent from the system.
+    
+    Removes an agent from the registry, typically called when an agent shuts down.
+    """
+    # Validate token
+    if credentials.credentials != Config.AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    # Unregister agent
+    success = await agent_registry.unregister_agent(agent_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    return {"status": "success", "agent_id": agent_id}
+
+@app.put("/api/agents/{agent_id}/status")
+async def update_agent_status(
+    agent_id: str,
+    status_update: Dict[str, str],
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Update agent status.
+    
+    Updates the status of an agent (e.g., idle, busy, offline).
+    """
+    # Validate token
+    if credentials.credentials != Config.AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    # Check if status is provided
+    if "status" not in status_update:
+        raise HTTPException(status_code=400, detail="Status not provided")
+    
+    # Update agent status
+    success = await agent_registry.update_agent_status(agent_id, status_update["status"])
+    if not success:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    return {"status": "updated", "agent_id": agent_id}
+
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
