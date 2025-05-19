@@ -13,6 +13,12 @@ Key features:
 - Human oversight for critical decisions
 - Comprehensive reporting system
 
+## Documentation
+For complete documentation, see:
+- [Project Overview](docs/overview.md)
+- [API Reference](docs/api.md)
+- [Usage Examples](docs/examples.md)
+
 ## Current Status
 
 **Week 1 Complete**: Basic infrastructure, MCP server, and Claude integration implemented.
