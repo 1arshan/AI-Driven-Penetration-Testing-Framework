@@ -8,7 +8,6 @@ from datetime import datetime
 from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
 from redis_client import RedisClient
-# from src.mcp_server.redis_client import RedisClient
 from src.mcp_server.ws_handler import connection_manager
 from src.mcp_server.task_queue import TaskQueue
 from src.utils.config import Config
@@ -17,6 +16,10 @@ from src.agents.agent_registry import AgentRegistry
 from src.knowledge_base.importers.security_data_importer import SecurityDataImporter
 from src.knowledge_base.security_kb import SecurityKnowledgeBase
 from src.mcp_server.message_bus import MessageBus
+from src.mcp_server.workflow_orchestrator import WorkflowOrchestrator
+from src.mcp_server.report_generator import ReportGenerator
+from fastapi.responses import HTMLResponse
+
 
 # Create FastAPI app
 app = FastAPI(
@@ -45,6 +48,9 @@ agent_registry = AgentRegistry()
 
 # Initialize message bus
 message_bus = MessageBus()
+
+# Initialize workflow orchestrator
+workflow_orchestrator = WorkflowOrchestrator()
 
 # Model definitions
 class TaskCreate(BaseModel):
@@ -344,6 +350,111 @@ async def update_agent_status(
         raise HTTPException(status_code=404, detail="Agent not found")
     
     return {"status": "updated", "agent_id": agent_id}
+
+
+@app.post("/api/workflows/recon_vuln")
+async def create_recon_vuln_workflow(
+        workflow_data: Dict[str, Any],
+        credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Create a new reconnaissance and vulnerability discovery workflow.
+
+    This endpoint creates a workflow that automatically chains a
+    reconnaissance task with a vulnerability discovery task.
+    """
+    # Validate token
+    if credentials.credentials != Config.AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    # Validate required fields
+    if "target" not in workflow_data:
+        raise HTTPException(status_code=400, detail="Target is required")
+
+    if "scope" not in workflow_data:
+        raise HTTPException(status_code=400, detail="Scope is required")
+
+    # Create workflow
+    workflow_id = await workflow_orchestrator.start_recon_vuln_workflow(
+        target=workflow_data["target"],
+        scope=workflow_data["scope"],
+        description=workflow_data.get("description", "Security assessment")
+    )
+
+    return {"workflow_id": workflow_id, "status": "created"}
+
+
+@app.get("/api/workflows/{workflow_id}")
+async def get_workflow(
+        workflow_id: str,
+        credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Get workflow details and status.
+
+    Returns information about the workflow and its tasks.
+    """
+    # Validate token
+    if credentials.credentials != Config.AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    # Get workflow
+    workflow = await workflow_orchestrator.get_workflow(workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    return workflow
+
+
+@app.get("/api/workflows/{workflow_id}/results")
+async def get_workflow_results(
+        workflow_id: str,
+        credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Get the results of a workflow.
+
+    Returns the results of all tasks in the workflow.
+    """
+    # Validate token
+    if credentials.credentials != Config.AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    # Get workflow results
+    results = await workflow_orchestrator.get_workflow_results(workflow_id)
+    if "error" in results:
+        raise HTTPException(status_code=404, detail=results["error"])
+
+    return results
+
+
+@app.get("/api/workflows/{workflow_id}/report", response_class=HTMLResponse)
+async def get_workflow_report(
+        workflow_id: str,
+        credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Generate an HTML report for a workflow.
+
+    Returns an HTML security assessment report based on workflow results.
+    """
+    # Validate token
+    if credentials.credentials != Config.AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    # Get workflow results
+    results = await workflow_orchestrator.get_workflow_results(workflow_id)
+    if "error" in results:
+        raise HTTPException(status_code=404, detail=results["error"])
+
+    # Check if workflow is complete
+    if results.get("status") != "completed":
+        raise HTTPException(status_code=400, detail="Workflow not completed yet")
+
+    # Generate report
+    html_report = ReportGenerator.generate_html_report(results)
+
+    return HTMLResponse(content=html_report)
 
 
 if __name__ == "__main__":

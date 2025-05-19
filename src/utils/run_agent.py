@@ -5,6 +5,7 @@ import sys
 import os
 from src.agents.reconnaissance_agent import ReconnaissanceAgent
 from src.agents.knowledge_base_agent import KnowledgeBaseAgent
+from src.agents.vulnerability_discovery_agent import VulnerabilityDiscoveryAgent
 
 
 async def run_agent(agent_type: str, agent_id: str = None):
@@ -24,6 +25,9 @@ async def run_agent(agent_type: str, agent_id: str = None):
         await agent.start()
     elif agent_type == "knowledge_base":
         agent = KnowledgeBaseAgent(agent_id=agent_id)
+        await agent.start()
+    elif agent_type == "vulnerability_discovery":
+        agent = VulnerabilityDiscoveryAgent(agent_id=agent_id)
         await agent.start()
     else:
         print(f"Unknown agent type: {agent_type}")
