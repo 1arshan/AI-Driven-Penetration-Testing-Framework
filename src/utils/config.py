@@ -4,6 +4,10 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Add ChromaDB settings
+CHROMA_HOST = os.getenv("CHROMA_HOST", "chromadb")
+CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8000"))
+
 class Config:
     # API Keys
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")

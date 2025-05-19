@@ -8,11 +8,13 @@ from datetime import datetime
 from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
 from src.mcp_server.redis_client import RedisClient
-from src.utils.config import Config
-from src.mcp_server.task_queue import TaskQueue
-from src.models.task_models import TaskCreate, TaskResponse, TaskStatus, TaskResult
 from src.mcp_server.ws_handler import connection_manager
+from src.mcp_server.task_queue import TaskQueue
+from src.utils.config import Config
+from src.models.task_models import TaskCreate, TaskResponse, TaskStatus, TaskResult
 from src.agents.agent_registry import AgentRegistry
+from src.knowledge_base.importers.security_data_importer import SecurityDataImporter
+from src.knowledge_base.security_kb import SecurityKnowledgeBase
 
 # Create FastAPI app
 app = FastAPI(
@@ -202,6 +204,17 @@ async def startup_event():
     # Start Redis listener for WebSocket broadcasts
     await connection_manager.start_redis_listener()
     print("WebSocket notification system initialized")
+
+    # Initialize security knowledge base
+    try:
+        kb = SecurityKnowledgeBase()
+        importer = SecurityDataImporter(kb)
+        results = importer.import_all_data()
+        print(f"Initialized security knowledge base with {results['total']} items")
+    except Exception as e:
+        print(f"WARNING: Failed to initialize security knowledge base: {e}")
+    
+    print("Server startup complete")
 
 # Add WebSocket endpoint
 @app.websocket("/ws/task-updates")
