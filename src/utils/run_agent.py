@@ -4,26 +4,31 @@ import argparse
 import sys
 import os
 from src.agents.reconnaissance_agent import ReconnaissanceAgent
+from src.agents.knowledge_base_agent import KnowledgeBaseAgent
+
 
 async def run_agent(agent_type: str, agent_id: str = None):
     """
     Run an agent of the specified type.
-    
+
     This starts the agent and begins its task processing loop.
-    
+
     Args:
         agent_type: Type of agent to run (e.g., "reconnaissance")
         agent_id: Optional unique ID for the agent
     """
     print(f"Starting {agent_type} agent...")
-    
+
     if agent_type == "reconnaissance":
         agent = ReconnaissanceAgent(agent_id=agent_id)
+        await agent.start()
+    elif agent_type == "knowledge_base":
+        agent = KnowledgeBaseAgent(agent_id=agent_id)
         await agent.start()
     else:
         print(f"Unknown agent type: {agent_type}")
         return
-    
+
     print(f"{agent_type} agent stopped.")
 
 if __name__ == "__main__":

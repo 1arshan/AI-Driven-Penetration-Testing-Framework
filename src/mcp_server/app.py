@@ -7,7 +7,8 @@ import json
 from datetime import datetime
 from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
-from src.mcp_server.redis_client import RedisClient
+from redis_client import RedisClient
+# from src.mcp_server.redis_client import RedisClient
 from src.mcp_server.ws_handler import connection_manager
 from src.mcp_server.task_queue import TaskQueue
 from src.utils.config import Config

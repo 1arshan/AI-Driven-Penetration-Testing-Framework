@@ -7,6 +7,7 @@ from typing import Dict, List, Any
 import redis.asyncio as redis
 from src.utils.config import Config
 
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
