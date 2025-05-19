@@ -59,7 +59,7 @@ This tool is designed for legitimate security testing only. Always ensure proper
 ## Documentation
 For complete documentation, see:
 - [Project Overview](docs/overview.md)
-- [Project Structure](docs/project_structure.md)  <!-- Add this line -->
+- [Project Structure](docs/project_structure.md) 
 - [Architecture](docs/architecture.md)
 - [Agent System](docs/agents.md)
 - [Knowledge Base](docs/knowledge_base.md)
