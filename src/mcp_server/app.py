@@ -15,6 +15,7 @@ from src.models.task_models import TaskCreate, TaskResponse, TaskStatus, TaskRes
 from src.agents.agent_registry import AgentRegistry
 from src.knowledge_base.importers.security_data_importer import SecurityDataImporter
 from src.knowledge_base.security_kb import SecurityKnowledgeBase
+from src.mcp_server.message_bus import MessageBus
 
 # Create FastAPI app
 app = FastAPI(
@@ -40,6 +41,9 @@ task_queue = TaskQueue()
 
 # Initialize agent registry
 agent_registry = AgentRegistry()
+
+# Initialize message bus
+message_bus = MessageBus()
 
 # Model definitions
 class TaskCreate(BaseModel):
@@ -204,6 +208,10 @@ async def startup_event():
     # Start Redis listener for WebSocket broadcasts
     await connection_manager.start_redis_listener()
     print("WebSocket notification system initialized")
+
+    # Initialize message bus
+    await message_bus.initialize()
+    print("Message bus initialized")
 
     # Initialize security knowledge base
     try:

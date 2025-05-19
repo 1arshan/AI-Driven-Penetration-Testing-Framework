@@ -6,6 +6,9 @@ from typing import Dict, List, Optional, Any
 import redis.asyncio as redis
 from src.utils.config import Config
 from src.utils.claude_client import ClaudeClient
+from src.mcp_server.message_bus import MessageBus
+from src.models.message_models import Message, TaskAssignmentMessage, TaskStatusUpdateMessage, TaskResultMessage
+
 
 class BaseAgent:
     """
@@ -57,6 +60,134 @@ class BaseAgent:
         print(f"Agent {self.agent_id} registered")
         
         return True
+
+    async def initialize_messaging(self):
+        """
+        Initialize agent messaging capabilities.
+
+        Sets up message bus connection and registers handlers.
+        """
+        self.message_bus = MessageBus()
+        await self.message_bus.initialize()
+
+        # Register message handlers
+        await self.message_bus.register_handler("task_assignment", self.handle_task_assignment)
+        await self.message_bus.register_handler("knowledge_response", self.handle_knowledge_response)
+
+    async def send_message(self, message: Dict[str, Any]) -> str:
+        """
+        Send a message to another agent or the MCP.
+
+        Args:
+            message: Dictionary containing the message data
+
+        Returns: Message ID of the sent message
+        """
+        # Add sender information if not present
+        if "sender_id" not in message:
+            message["sender_id"] = self.agent_id
+
+        # Send via message bus
+        return await self.message_bus.send_message(message)
+
+    async def handle_task_assignment(self, message: Dict[str, Any]):
+        """
+        Handle a task assignment message.
+
+        Args:
+            message: Dictionary containing task assignment data
+        """
+        print(f"Agent {self.agent_id} received task assignment: {message.get('content', {}).get('task_id')}")
+
+        # Extract task information
+        task_content = message.get("content", {})
+        task_id = task_content.get("task_id")
+
+        if not task_id:
+            print("Invalid task assignment message: missing task_id")
+            return
+
+        # Get full task data
+        task_data = await self.redis.get(f"task:{task_id}")
+        if not task_data:
+            print(f"Task {task_id} not found")
+            return
+
+        task = json.loads(task_data)
+
+        # Process the task
+        try:
+            await self.update_task_status(
+                task_id=task_id,
+                status="in_progress",
+                progress=0.0,
+                message=f"Starting task from direct assignment"
+            )
+
+            result = await self.process_task(task)
+
+            # Store the result
+            await self.store_result(task_id, result)
+
+            # Send task result message
+            await self.send_message({
+                "message_type": "task_result",
+                "recipient_id": message.get("sender_id"),
+                "reply_to": message.get("message_id"),
+                "content": {
+                    "task_id": task_id,
+                    "status": "success",
+                    "result": result,
+                    "summary": result.get("summary", "Task completed")
+                }
+            })
+
+        except Exception as e:
+            print(f"Error processing assigned task: {e}")
+            await self.update_task_status(
+                task_id=task_id,
+                status="failed",
+                progress=0.0,
+                message=f"Error: {str(e)}"
+            )
+
+    async def handle_knowledge_response(self, message: Dict[str, Any]):
+        """
+        Handle a knowledge base response message.
+
+        Args:
+            message: Dictionary containing knowledge response data
+        """
+        print(f"Agent {self.agent_id} received knowledge response")
+
+        # Store in agent memory for future use
+        await self.add_to_memory({
+            "message_type": "knowledge_response",
+            "query": message.get("content", {}).get("query"),
+            "results": message.get("content", {}).get("results"),
+            "message_id": message.get("message_id")
+        })
+
+    async def query_knowledge_base(self, query: str, collection: str, n_results: int = 5) -> str:
+        """
+        Query the knowledge base by sending a message.
+
+        Args:
+            query: Text to search for
+            collection: Collection to search (e.g., "vulnerabilities")
+            n_results: Maximum number of results to return
+
+        Returns: Message ID of the query message
+        """
+        return await self.send_message({
+            "message_type": "knowledge_query",
+            "recipient_id": "knowledge_base_agent",  # Special agent ID for knowledge base
+            "content": {
+                "query": query,
+                "collection": collection,
+                "n_results": n_results
+            }
+        })
     
     def get_capabilities(self) -> List[str]:
         """
@@ -215,29 +346,32 @@ class BaseAgent:
         Returns: List of most recent memory items, up to the specified limit
         """
         return self.memory[-limit:] if self.memory else []
-    
+
     async def start(self):
         """
         Start the agent's main processing loop.
-        
+
         Registers the agent and then enters a loop to retrieve and process tasks.
         The loop continues until the agent's running flag is set to False.
         """
         self.running = True
-        
+
         # Register agent
         await self.register_agent()
-        
+
+        # Initialize messaging
+        await self.initialize_messaging()
+
         # Main agent loop
         while self.running:
             try:
                 # Get task
                 task = await self.get_task()
-                
+
                 if task:
                     task_id = task["id"]
                     print(f"Agent {self.agent_id} processing task {task_id}")
-                    
+
                     # Update status
                     await self.update_task_status(
                         task_id=task_id,
@@ -245,20 +379,20 @@ class BaseAgent:
                         progress=0.0,
                         message="Starting task"
                     )
-                    
+
                     # Process task
                     result = await self.process_task(task)
-                    
+
                     # Store result
                     await self.store_result(task_id, result)
-                    
+
                     # Add to memory
                     await self.add_to_memory({
                         "task_id": task_id,
                         "task_type": task["type"],
                         "result_summary": result.get("summary", "Task completed")
                     })
-                    
+
                     print(f"Agent {self.agent_id} completed task {task_id}")
                 else:
                     # No task available, wait before checking again
@@ -282,3 +416,4 @@ class BaseAgent:
         to exit once the current task is completed.
         """
         self.running = False
+
